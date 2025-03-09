@@ -1,3 +1,5 @@
+*.pdf
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
@@ -172,3 +174,8 @@ cython_debug/
 .vscode/tasks.json
 zap_scan_results.txt
 
+/analysis
+/scans
+/SSTImap
+/XSStrike
+/commix

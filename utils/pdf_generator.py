@@ -31,21 +31,45 @@ class PDFGenerator:
         self.elements.append(Spacer(1, 12))
 
     def _add_summary(self, report: VulnerabilityReport):
-        self.elements.append(Paragraph("Summary", self.styles["Heading2"]))
+        """Add the executive summary section to the PDF using ReportLab."""
+        # Add summary title
+        self.elements.append(Paragraph("Executive Summary", self.styles["Heading2"]))
+        self.elements.append(Spacer(1, 6))
+        
+        # Check if summary exists
+        if not hasattr(report, 'summary') or report.summary is None:
+            self.elements.append(Paragraph("No summary data available.", self.styles["Normal"]))
+            self.elements.append(Spacer(1, 12))
+            return
+        
+        # Get summary data with safe fallbacks
+        total_vulns = report.summary.get('total', 'N/A') if isinstance(report.summary, dict) else 'N/A'
+        high_risk = report.summary.get('high', 'N/A') if isinstance(report.summary, dict) else 'N/A'
+        medium_risk = report.summary.get('medium', 'N/A') if isinstance(report.summary, dict) else 'N/A'
+        low_risk = report.summary.get('low', 'N/A') if isinstance(report.summary, dict) else 'N/A'
+        
+        # Create summary list
         summary_data = [
-            f"Total Vulnerabilities: {report.summary['total']}",
-            f"Critical: {report.summary['critical']}",
-            f"High: {report.summary['high']}",
-            f"Medium: {report.summary['medium']}",
-            f"Low: {report.summary['low']}",
-            f"Info: {report.summary['info']}",
-            f"Risk Score: {report.risk_score:.2f}" if report.risk_score is not None else "Risk Score: N/A",
+            f"<b>Total Vulnerabilities:</b> {total_vulns}",
+            f"<b>High Risk:</b> {high_risk}",
+            f"<b>Medium Risk:</b> {medium_risk}",
+            f"<b>Low Risk:</b> {low_risk}"
         ]
+        
+        # Add summary list
         bullet_list = ListFlowable(
             [ListItem(Paragraph(data, self.styles['Normal'])) for data in summary_data],
-            bulletType='bullet'
+            bulletType='bullet',
+            leftIndent=20
         )
         self.elements.append(bullet_list)
+        
+        # Add general assessment if available
+        if isinstance(report.summary, dict) and 'assessment' in report.summary:
+            self.elements.append(Spacer(1, 10))
+            self.elements.append(Paragraph("General Assessment:", self.styles["Heading3"]))
+            self.elements.append(Paragraph(report.summary['assessment'], self.styles["Normal"]))
+        
         self.elements.append(Spacer(1, 12))
 
 
@@ -74,24 +98,33 @@ class PDFGenerator:
                 f"<b>Remediation:</b> {vuln.remediation}",
             ]
 
-            # Add References (nested list)
-            if vuln.references:
-                details_data.append("<b>References:</b>")
-                ref_list_items = [ListItem(Paragraph(f"<a href='{ref}'>{ref}</a>", self.styles['Normal'])) for ref in vuln.references]
-                details_data.append(ListFlowable(ref_list_items, bulletType='bullet', leftIndent=20))
-
-            if vuln.proof_of_concept:
-                  details_data.append(f"<b>Proof of Concept:</b> <br/>{vuln.proof_of_concept}") # Added PoC
-
-            if vuln.secure_code_example:
-                  details_data.append(f"<b>Secure Code Example:</b> <br/>{vuln.secure_code_example}")  #Added Example
-
-
+            # Add main details
             bullet_list = ListFlowable(
-                [ListItem(Paragraph(data, self.styles['Normal']), leftIndent=20) for data in details_data],
-                bulletType='bullet'
+                [ListItem(Paragraph(data, self.styles['Normal'])) for data in details_data],
+                bulletType='bullet',
+                leftIndent=20  # Apply leftIndent to the entire ListFlowable, not individual items
             )
             self.elements.append(bullet_list)
+
+            # Add References (as a separate section)
+            if vuln.references:
+                self.elements.append(Paragraph("<b>References:</b>", self.styles['Normal']))
+                ref_list = ListFlowable(
+                    [ListItem(Paragraph(f"<a href='{ref}'>{ref}</a>", self.styles['Normal'])) for ref in vuln.references],
+                    bulletType='bullet',
+                    leftIndent=40  # Indented further to show hierarchy
+                )
+                self.elements.append(ref_list)
+
+            # Add PoC and Secure Code Example as paragraphs
+            if vuln.proof_of_concept:
+                self.elements.append(Paragraph("<b>Proof of Concept:</b>", self.styles['Normal']))
+                self.elements.append(Paragraph(vuln.proof_of_concept, self.styles['Code']))  # Use a code style if available
+
+            if vuln.secure_code_example:
+                self.elements.append(Paragraph("<b>Secure Code Example:</b>", self.styles['Normal']))
+                self.elements.append(Paragraph(vuln.secure_code_example, self.styles['Code']))  # Use a code style if available
+
             self.elements.append(Spacer(1, 12))
 
 
@@ -107,30 +140,37 @@ class PDFGenerator:
             details_data = [
                 f"<b>Attack Path:</b> {chain.attack_path}",
                 f"<b>Likelihood:</b> {chain.likelihood}",
-                f"<b>Mitigation Priority:</b> {chain.mitigation_priority}",
-                "<b>Prerequisites:</b>",
+                f"<b>Mitigation Priority:</b> {chain.mitigation_priority}"
             ]
-            prereq_list_items = [ListItem(Paragraph(prereq, self.styles['Normal'])) for prereq in chain.prerequisites]
-            details_data.append(ListFlowable(prereq_list_items, bulletType='bullet', leftIndent=20))
 
-
+            # Add main chain details
             bullet_list = ListFlowable(
-              [ListItem(Paragraph(data, self.styles['Normal']), leftIndent=20) for data in details_data],
-              bulletType='bullet'
-              )
-
+                [ListItem(Paragraph(data, self.styles['Normal'])) for data in details_data],
+                bulletType='bullet',
+                leftIndent=20  # Apply leftIndent to the entire ListFlowable
+            )
             self.elements.append(bullet_list)
+
+            # Add prerequisites as a separate section
+            self.elements.append(Paragraph("<b>Prerequisites:</b>", self.styles['Normal']))
+            prereq_list = ListFlowable(
+                [ListItem(Paragraph(prereq, self.styles['Normal'])) for prereq in chain.prerequisites],
+                bulletType='bullet',
+                leftIndent=40  # Indented further to show hierarchy
+            )
+            self.elements.append(prereq_list)
+
             self.elements.append(Spacer(1, 12))
 
 
     def _get_severity_color(self, severity: VulnerabilitySeverity):
-      if severity == VulnerabilitySeverity.CRITICAL:
-          return colors.red
-      elif severity == VulnerabilitySeverity.HIGH:
-          return colors.orange
-      elif severity == VulnerabilitySeverity.MEDIUM:
-          return colors.yellow
-      elif severity == VulnerabilitySeverity.LOW:
-        return colors.green
-      else:  # INFO
-        return colors.blue
+        if severity == VulnerabilitySeverity.CRITICAL:
+            return colors.red
+        elif severity == VulnerabilitySeverity.HIGH:
+            return colors.orange
+        elif severity == VulnerabilitySeverity.MEDIUM:
+            return colors.yellow
+        elif severity == VulnerabilitySeverity.LOW:
+            return colors.green
+        else:  # INFO
+            return colors.blue

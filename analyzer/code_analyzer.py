@@ -112,27 +112,37 @@ class CodeAnalyzer:
             logging.error(f"AI analysis failed: {str(e)}")
             raise RuntimeError(f"Security analysis failed: {str(e)}")
 
-        # Process and validate vulnerabilities
-        vulnerabilities = self._process_ai_response(analysis_result)
+        # Process vulnerabilities with enhanced error handling
+        try:
+            # Process and validate vulnerabilities
+            vulnerabilities = self._process_ai_response(analysis_result, filename)
 
-        # Chain vulnerabilities to find compound risks
-        chained_vulnerabilities = self._chain_vulnerabilities(vulnerabilities)
+            # Chain vulnerabilities to find compound risks
+            chained_vulnerabilities = self._chain_vulnerabilities(vulnerabilities)
 
-        # Create and return the report
-        report = VulnerabilityReport(
-            file_name=filename,
-            vulnerabilities=vulnerabilities,
-            chained_vulnerabilities=chained_vulnerabilities,
-            timestamp=datetime.now()
-        )
+            # Create and return the report
+            report = VulnerabilityReport(
+                file_name=filename,
+                vulnerabilities=vulnerabilities,
+                chained_vulnerabilities=chained_vulnerabilities,
+                timestamp=datetime.now()
+            )
 
-        # Calculate summary statistics
-        report.calculate_summary()
-        report.calculate_risk_score()
+            # Calculate summary statistics
+            report.calculate_summary()
+            report.calculate_risk_score()
 
-        return report
+            return report
+        except Exception as e:
+            logging.error(f"Failed during vulnerability processing: {str(e)}")
+            # Return a basic report without detailed processing instead of failing
+            return VulnerabilityReport(
+                file_name=filename,
+                vulnerabilities=[],
+                chained_vulnerabilities=[],
+                timestamp=datetime.now()
+            )
 
-    @lru_cache(maxsize=100)
     async def _get_analysis_with_retry(self, prompt: str, max_retries: int = 3) -> Dict[str, Any]:
         """
         Get AI analysis with retry logic and caching
@@ -254,7 +264,7 @@ class CodeAnalyzer:
         # Analyze each file
         all_vulnerabilities = []
         for file_path in files_to_analyze:
-            with open(file_path, 'r') as f:
+            with open(file_path, 'r', encoding='utf-8') as f:
                 content = f.read()
             report = await self.analyze_code(content, str(file_path))
             all_vulnerabilities.extend(report.vulnerabilities)
@@ -295,6 +305,7 @@ class CodeAnalyzer:
     - Recommended fixes with secure code example
 
 3. Code Context:
+    - File name: {parsed_code.get('file_name', 'unknown')}
     - Imports: {parsed_code.get('imports', [])}
     - Functions: {[f['name'] for f in parsed_code.get('functions', [])]}
     - Classes: {[c['name'] for c in parsed_code.get('classes', [])]}
@@ -312,7 +323,7 @@ class CodeAnalyzer:
 Format response as JSON matching the Vulnerability model structure.
 """
 
-    def _process_ai_response(self, analysis_result: Dict[str, Any]) -> List[Vulnerability]:
+    def _process_ai_response(self, analysis_result: Dict[str, Any], file_path: str = None) -> List[Vulnerability]:
         """
         Process and validate the AI analysis response into Vulnerability objects.
 
@@ -397,17 +408,24 @@ Format response as JSON matching the Vulnerability model structure.
                     mapped_type = type_mapping.get(original_type)
 
                     if mapped_type is None:
-                        logging.warning(f"Unknown vulnerability type encountered: {original_type}")
-                        unprocessed_types.add(original_type)
-                        continue
+                        original_type = original_type.replace('-', '_')
+                        # find if any sort of slice of the original type is present in the vulnerability type
+                        mapped_type = next((t for t in VulnerabilityType if t.value in original_type), None)
 
-                    vuln_type = mapped_type
-                    logging.info(f"Mapped vulnerability type '{original_type}' to '{vuln_type.value}'")
+
+                    if mapped_type is None:
+                        # IMPORTANT CHANGE: Instead of skipping with continue, use a default type
+                        logging.warning(f"Unknown vulnerability type encountered: {original_type}. Using GENERIC_SECURITY_ISSUE as fallback.")
+                        unprocessed_types.add(original_type)
+                        vuln_type = VulnerabilityType.GENERIC_SECURITY_ISSUE
+                    else:
+                        vuln_type = mapped_type
+                        logging.info(f"Mapped vulnerability type '{original_type}' to '{vuln_type.value}'")
 
                 # Create CodeLocation object
                 location_data = vuln_data.get('location', {})
                 location = CodeLocation(
-                    file_path=location_data.get('file_path', ''),
+                    file_path=file_path or location_data.get('file_path', ''),
                     start_line=location_data.get('start_line', 0),
                     end_line=location_data.get('end_line', 0),
                     start_col=location_data.get('start_col', 0),
@@ -418,7 +436,7 @@ Format response as JSON matching the Vulnerability model structure.
                 # Create Vulnerability object with validated data
                 vulnerability = Vulnerability(
                     type=vuln_type,
-                    severity=severity,  # Use mapped severity
+                    severity=severity,
                     location=location,
                     description=vuln_data.get('description', ''),
                     impact=vuln_data.get('impact', ''),
@@ -966,13 +984,15 @@ Format response as JSON matching the Vulnerability model structure.
 
         relevant_files = []
         for root, dirs, files in os.walk(repo_path):
+            # skip .git directory
+            if '.git' in dirs:
+                dirs.remove('.git')
             # Calculate the current depth
             current_depth = root.count(os.sep) - repo_path.count(os.sep)
             if current_depth < scan_depth:
                 for file in files:
                     file_path = os.path.join(root, file)
-                    # Add logic to filter files if needed (e.g., only .py files)
-                    if file.endswith('.py'):  # Example: only analyze Python files
+                    if file_path.endswith(('.py', '.js', '.ts', '.java', '.cpp', '.c', '.cs', '.go', '.rb', '.php', '.rs', '.swift', '.kt', '.scala')):
                         relevant_files.append(file_path)
 
         return relevant_files
